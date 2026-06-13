@@ -1,38 +1,27 @@
-"""StarlinkClient — full gRPC API wrapper for the Starlink dish."""
+"""StarlinkClient — full gRPC API wrapper for the Starlink dish.
+
+Uses yagrc server reflection: no proto files or codegen step required.
+The dish itself advertises its schema at connect time.
+"""
 
 from __future__ import annotations
 
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Generator, Optional
 
 import grpc
+from yagrc import reflector as yagrc_reflector
 
 DISH_HOST = "192.168.100.1"
 DISH_PORT = 9200
 DEFAULT_TIMEOUT = 10.0
 
-
-def _lazy_imports():
-    """Import proto stubs lazily so the module loads even before setup_protos runs."""
-    try:
-        from starlink_telemetry.proto.spacex.api.device import (  # type: ignore[import]
-            device_pb2,
-            device_pb2_grpc,
-            dish_pb2,
-        )
-        return device_pb2, device_pb2_grpc, dish_pb2
-    except ImportError as exc:
-        raise RuntimeError(
-            "Proto stubs not found. Run: python scripts/setup_protos.py"
-        ) from exc
+_SERVICE = "SpaceX.API.Device.Device"
 
 
 @dataclass
 class DishStatus:
-    """Parsed dish status snapshot."""
-
     state: str
     uptime_s: int
     snr_above_noise_floor: float
@@ -45,7 +34,6 @@ class DishStatus:
     seconds_to_first_nonempty_slot: float
     gps_valid: bool
     gps_sats: int
-    # Alerts
     alert_motors_stuck: bool
     alert_thermal_throttle: bool
     alert_thermal_shutdown: bool
@@ -55,10 +43,8 @@ class DishStatus:
     alert_roaming: bool
     alert_install_pending: bool
     alert_is_heating: bool
-    # Obstruction
     fraction_obstruction_ratio: float
     valid_s: int
-    # Device info
     id: str
     hardware_version: str
     software_version: str
@@ -68,8 +54,6 @@ class DishStatus:
 
 @dataclass
 class DishHistory:
-    """Parsed history ring-buffer (up to ~12 hours at 1-second resolution)."""
-
     current: int
     pop_ping_drop_rate: list[float] = field(default_factory=list)
     pop_ping_latency_ms: list[float] = field(default_factory=list)
@@ -83,8 +67,6 @@ class DishHistory:
 
 @dataclass
 class ObstructionMap:
-    """Obstruction map bitmap."""
-
     num_rows: int
     num_cols: int
     min_elevation_deg: float
@@ -93,8 +75,6 @@ class ObstructionMap:
 
 @dataclass
 class DishConfig:
-    """Dish configuration."""
-
     snow_melt_mode: int
     location_request_mode: int
     level_dish_mode: int
@@ -109,16 +89,10 @@ class DishConfig:
 
 @dataclass
 class DishDiagnostics:
-    """Hardware diagnostics."""
-
-    id: str
     hardware_version: str
     software_version: str
     country_code: str
     utc_offset_s: int
-    # Connectivity
-    connected: bool
-    # Dishy alerts as a flat dict
     alerts: dict[str, bool] = field(default_factory=dict)
 
 
@@ -126,19 +100,19 @@ class StarlinkClient:
     """
     Full gRPC client for the Starlink dish local API.
 
-    Connects to the dish at 192.168.100.1:9200 (or a custom host/port).
-    The dish must be reachable on your local network — the Starlink Mini
-    typically bridges its subnet when using the Starlink router bypass cable
-    or when bypassing via the app.
+    Connects to the dish at 192.168.100.1:9200 using gRPC server reflection
+    (yagrc) — no proto files or codegen step required.
 
     Usage:
-        client = StarlinkClient()
-        status = client.get_status()
-        print(status.downlink_throughput_bps)
-
-        # Or use as a context manager:
         with StarlinkClient() as c:
-            history = c.get_history()
+            status = c.get_status()
+            print(status.downlink_throughput_bps)
+
+        # Or manage connection manually:
+        client = StarlinkClient(host="192.168.100.1")
+        client.connect()
+        history = client.get_history()
+        client.close()
     """
 
     def __init__(
@@ -152,19 +126,32 @@ class StarlinkClient:
         self.timeout = timeout
         self._channel: Optional[grpc.Channel] = None
         self._stub = None
+        self._Request = None
+        self._DishConfig = None
 
     # ------------------------------------------------------------------
-    # Connection management
+    # Connection
     # ------------------------------------------------------------------
 
     def connect(self) -> None:
-        """Open the gRPC channel."""
-        device_pb2, device_pb2_grpc, dish_pb2 = _lazy_imports()
-        self._device_pb2 = device_pb2
-        self._device_pb2_grpc = device_pb2_grpc
-        self._dish_pb2 = dish_pb2
+        """Open gRPC channel and load reflection schema from the dish."""
         self._channel = grpc.insecure_channel(f"{self.host}:{self.port}")
-        self._stub = device_pb2_grpc.DeviceStub(self._channel)
+        grc = yagrc_reflector.GrpcReflectionClient()
+        try:
+            grc.load_protocols(self._channel, symbols=[_SERVICE])
+        except (yagrc_reflector.ServiceError, KeyError) as exc:
+            self._channel.close()
+            raise ConnectionError(
+                f"Could not load gRPC schema from dish at {self.host}:{self.port}. "
+                "Is the dish reachable?"
+            ) from exc
+
+        self._stub = grc.service_stub_class(_SERVICE)(self._channel)
+        self._Request = grc.message_class("SpaceX.API.Device.Request")
+        try:
+            self._DishConfig = grc.message_class("SpaceX.API.Device.DishConfig")
+        except KeyError:
+            self._DishConfig = None
 
     def close(self) -> None:
         if self._channel:
@@ -183,37 +170,32 @@ class StarlinkClient:
         if self._stub is None:
             self.connect()
 
-    def _handle(self, request):
-        """Send a single ToDevice request and return the response."""
+    def _request(self, **kwargs):
+        """Send a Request message and return the response."""
         self._ensure_connected()
-        return self._stub.Handle(  # type: ignore[union-attr]
-            iter([request]),
-            timeout=self.timeout,
-        )
-
-    @contextmanager
-    def _stream(self) -> Generator:
-        """Yield the stub for use in streaming scenarios."""
-        self._ensure_connected()
-        yield self._stub
+        req = self._Request(**kwargs)
+        resp = self._stub.Handle(iter([req]), timeout=self.timeout)
+        return next(resp)
 
     # ------------------------------------------------------------------
-    # Core API — read operations
+    # Read operations
     # ------------------------------------------------------------------
 
     def get_status(self) -> DishStatus:
-        """Return current dish status including signal, throughput, and alerts."""
-        req = self._device_pb2.ToDevice(
-            get_status=self._dish_pb2.DishGetStatusRequest()
-        )
-        resp = next(self._handle(req))
+        """Return current dish status: signal, throughput, alerts, pointing."""
+        resp = self._request(get_status={})
         s = resp.dish_get_status
-
-        dev = s.device_info
         alerts = s.alerts
+        dev = s.device_info
+
+        def _state_name(val):
+            try:
+                return type(val).Name(val)
+            except Exception:
+                return str(val)
 
         return DishStatus(
-            state=s.state.Name(s.state) if hasattr(s.state, "Name") else str(s.state),
+            state=_state_name(s.state),
             uptime_s=s.device_state.uptime_s,
             snr_above_noise_floor=s.snr_above_noise_floor,
             pop_ping_drop_rate=s.pop_ping_drop_rate,
@@ -245,12 +227,8 @@ class StarlinkClient:
 
     def get_history(self) -> DishHistory:
         """Return the history ring-buffer (~12 hours at 1-second resolution)."""
-        req = self._device_pb2.ToDevice(
-            get_history=self._dish_pb2.DishGetHistoryRequest()
-        )
-        resp = next(self._handle(req))
+        resp = self._request(get_history={})
         h = resp.dish_get_history
-
         return DishHistory(
             current=h.current,
             pop_ping_drop_rate=list(h.pop_ping_drop_rate),
@@ -264,13 +242,9 @@ class StarlinkClient:
         )
 
     def get_obstruction_map(self) -> ObstructionMap:
-        """Return the obstruction map (sky view bitmap)."""
-        req = self._device_pb2.ToDevice(
-            get_obstruction_map=self._dish_pb2.DishGetObstructionMapRequest()
-        )
-        resp = next(self._handle(req))
+        """Return the sky obstruction map bitmap."""
+        resp = self._request(get_obstruction_map={})
         m = resp.dish_get_obstruction_map
-
         return ObstructionMap(
             num_rows=m.num_rows,
             num_cols=m.num_cols,
@@ -280,12 +254,8 @@ class StarlinkClient:
 
     def get_config(self) -> DishConfig:
         """Return current dish configuration."""
-        req = self._device_pb2.ToDevice(
-            dish_get_config=self._dish_pb2.DishGetConfigRequest()
-        )
-        resp = next(self._handle(req))
+        resp = self._request(dish_get_config={})
         c = resp.dish_get_config.dish_config
-
         return DishConfig(
             snow_melt_mode=c.snow_melt_mode,
             location_request_mode=c.location_request_mode,
@@ -301,10 +271,7 @@ class StarlinkClient:
 
     def get_diagnostics(self) -> DishDiagnostics:
         """Return hardware diagnostics."""
-        req = self._device_pb2.ToDevice(
-            get_diagnostics=self._dish_pb2.DishGetDiagnosticsRequest()
-        )
-        resp = next(self._handle(req))
+        resp = self._request(get_diagnostics={})
         d = resp.dish_get_diagnostics
         dev = d.id
 
@@ -315,18 +282,12 @@ class StarlinkClient:
                 alerts[descriptor.name] = val
 
         return DishDiagnostics(
-            id=dev.hardware_version,  # diagnostics DeviceInfo differs slightly
-            hardware_version=dev.hardware_version if hasattr(dev, "hardware_version") else "",
-            software_version=dev.software_version if hasattr(dev, "software_version") else "",
-            country_code=dev.country_code if hasattr(dev, "country_code") else "",
-            utc_offset_s=dev.utc_offset_s if hasattr(dev, "utc_offset_s") else 0,
-            connected=d.wifi_config.boot_count > 0 if hasattr(d, "wifi_config") else False,
+            hardware_version=getattr(dev, "hardware_version", ""),
+            software_version=getattr(dev, "software_version", ""),
+            country_code=getattr(dev, "country_code", ""),
+            utc_offset_s=getattr(dev, "utc_offset_s", 0),
             alerts=alerts,
         )
-
-    # ------------------------------------------------------------------
-    # History helpers
-    # ------------------------------------------------------------------
 
     def get_history_summary(self) -> dict:
         """Return averaged stats over the available history window."""
@@ -335,18 +296,18 @@ class StarlinkClient:
         if n == 0:
             return {}
 
-        def _avg(lst: list) -> float:
+        def _avg(lst):
             return sum(lst) / len(lst) if lst else 0.0
 
         scheduled = [v for v, s in zip(h.pop_ping_drop_rate, h.scheduled) if s]
+        latency_valid = [v for v in h.pop_ping_latency_ms if v > 0]
         obstructed_count = sum(1 for v in h.obstructed if v)
         no_sats_count = sum(1 for v in h.no_sats if v)
-        latency_valid = [v for v in h.pop_ping_latency_ms if v > 0]
 
         return {
             "samples": n,
             "avg_ping_drop_rate": _avg(h.pop_ping_drop_rate),
-            "avg_ping_drop_rate_scheduled": _avg(scheduled) if scheduled else 0.0,
+            "avg_ping_drop_rate_scheduled": _avg(scheduled),
             "avg_latency_ms": _avg(latency_valid),
             "avg_downlink_bps": _avg(h.downlink_throughput_bps),
             "avg_uplink_bps": _avg(h.uplink_throughput_bps),
@@ -360,24 +321,15 @@ class StarlinkClient:
 
     def reboot(self) -> None:
         """Reboot the dish."""
-        req = self._device_pb2.ToDevice(
-            reboot=self._dish_pb2.DishRebootRequest()
-        )
-        next(self._handle(req))
+        self._request(reboot={})
 
     def stow(self) -> None:
-        """Stow the dish (tilt flat for transport)."""
-        req = self._device_pb2.ToDevice(
-            dish_stow=self._dish_pb2.DishStowRequest(unstow=False)
-        )
-        next(self._handle(req))
+        """Stow the dish flat for transport."""
+        self._request(dish_stow={"unstow": False})
 
     def unstow(self) -> None:
-        """Unstow the dish (return to operational position)."""
-        req = self._device_pb2.ToDevice(
-            dish_stow=self._dish_pb2.DishStowRequest(unstow=True)
-        )
-        next(self._handle(req))
+        """Return the dish to operational position."""
+        self._request(dish_stow={"unstow": True})
 
     def set_config(
         self,
@@ -387,36 +339,32 @@ class StarlinkClient:
         power_save_duration_minutes: Optional[int] = None,
         snow_melt_mode: Optional[int] = None,
     ) -> None:
-        """Update dish configuration. Only provided fields are changed."""
-        cfg = self._dish_pb2.DishConfig()
+        """Update dish configuration. Only provided fields are applied."""
+        if self._DishConfig is None:
+            raise RuntimeError("DishConfig message not available via reflection.")
 
+        cfg_kwargs: dict = {}
         if power_save_mode is not None:
-            cfg.power_save_mode = power_save_mode
-            cfg.apply_power_save_mode = True
-
+            cfg_kwargs["power_save_mode"] = power_save_mode
+            cfg_kwargs["apply_power_save_mode"] = True
         if power_save_start_minutes is not None:
-            cfg.power_save_start_minutes = power_save_start_minutes
-            cfg.apply_power_save_start_minutes = True
-
+            cfg_kwargs["power_save_start_minutes"] = power_save_start_minutes
+            cfg_kwargs["apply_power_save_start_minutes"] = True
         if power_save_duration_minutes is not None:
-            cfg.power_save_duration_minutes = power_save_duration_minutes
-            cfg.apply_power_save_duration_minutes = True
-
+            cfg_kwargs["power_save_duration_minutes"] = power_save_duration_minutes
+            cfg_kwargs["apply_power_save_duration_minutes"] = True
         if snow_melt_mode is not None:
-            cfg.snow_melt_mode = snow_melt_mode
-            cfg.apply_snow_melt_mode = True
+            cfg_kwargs["snow_melt_mode"] = snow_melt_mode
+            cfg_kwargs["apply_snow_melt_mode"] = True
 
-        req = self._device_pb2.ToDevice(
-            dish_set_config=self._dish_pb2.DishSetConfigRequest(dish_config=cfg)
-        )
-        next(self._handle(req))
+        self._request(dish_set_config={"dish_config": self._DishConfig(**cfg_kwargs)})
 
     # ------------------------------------------------------------------
     # Live monitoring
     # ------------------------------------------------------------------
 
     def monitor(self, interval_s: float = 1.0) -> Generator[DishStatus, None, None]:
-        """Yield DishStatus snapshots at the given interval (seconds) forever."""
+        """Yield DishStatus snapshots at the given interval forever."""
         while True:
             yield self.get_status()
             time.sleep(interval_s)

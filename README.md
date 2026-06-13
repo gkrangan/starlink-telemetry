@@ -8,13 +8,15 @@ A Python library and CLI for pulling real-time telemetry, stats, and diagnostics
 
 Every Starlink dish exposes a private gRPC service at `192.168.100.1:9200` on your local network. This tool talks directly to that endpoint — no Starlink account, no cloud, no internet required — using the same protobuf API that the official Starlink app uses.
 
+It uses **gRPC server reflection** via [yagrc](https://github.com/sparky8512/yagrc): the dish advertises its own API schema at connect time, so there are no proto files to compile or maintain. The schema is always in sync with your dish's firmware.
+
 ---
 
 ## Requirements
 
 - Python 3.9+
 - Starlink dish reachable at `192.168.100.1` (standard setup) or a custom IP
-- pip packages: `grpcio`, `grpcio-tools`, `protobuf`, `click`, `rich`, `requests`
+- pip packages: `grpcio`, `protobuf`, `yagrc`, `click`, `rich`
 
 ---
 
@@ -23,19 +25,13 @@ Every Starlink dish exposes a private gRPC service at `192.168.100.1:9200` on yo
 ```bash
 git clone https://github.com/gkrangan/starlink-telemetry.git
 cd starlink-telemetry
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
 
-### Generate gRPC stubs (required before first use)
-
-The proto definitions are sourced from [sparky8512/starlink-grpc-tools](https://github.com/sparky8512/starlink-grpc-tools) and compiled locally:
-
-```bash
-python scripts/setup_protos.py
-```
-
-This downloads the `.proto` files and generates Python stubs into `starlink_telemetry/proto/`. Only needs to be run once (or again after a firmware update changes the API).
+That's it — no extra setup step needed. Connect to your Starlink network and run `starlink status`.
 
 ---
 
@@ -264,12 +260,9 @@ sudo route add -net 192.168.100.0/24 -interface en5
 ```
 starlink-telemetry/
 ├── starlink_telemetry/
-│   ├── __init__.py          # exports StarlinkClient
-│   ├── client.py            # StarlinkClient + dataclasses
-│   ├── cli.py               # click + rich CLI
-│   └── proto/               # generated gRPC stubs (after setup_protos.py)
-├── scripts/
-│   └── setup_protos.py      # downloads & compiles proto files
+│   ├── __init__.py    # exports StarlinkClient
+│   ├── client.py      # StarlinkClient + dataclasses
+│   └── cli.py         # click + rich CLI
 ├── requirements.txt
 └── pyproject.toml
 ```
@@ -278,4 +271,4 @@ starlink-telemetry/
 
 ## Credits
 
-Proto definitions sourced from [sparky8512/starlink-grpc-tools](https://github.com/sparky8512/starlink-grpc-tools), the definitive reference for the Starlink local gRPC API.
+gRPC reflection approach inspired by [sparky8512/starlink-grpc-tools](https://github.com/sparky8512/starlink-grpc-tools), the definitive reference for the Starlink local gRPC API. Schema discovery powered by [yagrc](https://github.com/sparky8512/yagrc).
