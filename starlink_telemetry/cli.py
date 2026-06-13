@@ -58,42 +58,40 @@ def _fmt_uptime(s: int) -> str:
 
 
 def _status_panel(s) -> Panel:
+    snr_label = "[green]yes[/]" if s.is_snr_above_noise_floor else "[red]no[/]"
+    obst_label = "[red]yes[/]" if s.currently_obstructed else "[green]no[/]"
+
     # Signal / throughput
     sig = Table.grid(padding=(0, 2))
-    sig.add_row("[bold]State[/]", s.state)
     sig.add_row("[bold]Uptime[/]", _fmt_uptime(s.uptime_s))
     sig.add_row("[bold]Latency[/]", f"{s.pop_ping_latency_ms:.1f} ms")
     sig.add_row("[bold]Ping drop[/]", f"{s.pop_ping_drop_rate*100:.2f}%")
-    sig.add_row("[bold]SNR above noise[/]", f"{s.snr_above_noise_floor:.2f} dB")
+    sig.add_row("[bold]SNR above noise[/]", snr_label)
     sig.add_row("[bold]Downlink[/]", _fmt_bps(s.downlink_throughput_bps))
     sig.add_row("[bold]Uplink[/]", _fmt_bps(s.uplink_throughput_bps))
-    sig.add_row("[bold]Obstruction[/]", f"{s.fraction_obstruction_ratio*100:.1f}%")
+    sig.add_row("[bold]Ethernet[/]", f"{s.eth_speed_mbps} Mbps")
+    sig.add_row("[bold]Obstructed[/]", obst_label)
+    sig.add_row("[bold]Obstruction %[/]", f"{s.fraction_obstruction_ratio*100:.1f}%")
 
-    # Pointing
+    # Pointing / state
+    ready_all = all([s.ready_cady, s.ready_scp, s.ready_l1l2, s.ready_xphy, s.ready_aap, s.ready_rf])
     point = Table.grid(padding=(0, 2))
     point.add_row("[bold]Azimuth[/]", f"{s.azimuth_deg:.1f}°")
     point.add_row("[bold]Elevation[/]", f"{s.elevation_deg:.1f}°")
     point.add_row("[bold]GPS valid[/]", "[green]yes[/]" if s.gps_valid else "[red]no[/]")
     point.add_row("[bold]GPS sats[/]", str(s.gps_sats))
-    point.add_row("[bold]Slots in[/]", f"{s.seconds_to_first_nonempty_slot:.1f}s")
+    slots_val = s.seconds_to_first_nonempty_slot
+    slots_str = "connected" if slots_val > 3600 else f"{slots_val:.1f}s"
+    point.add_row("[bold]Slots in[/]", slots_str)
+    point.add_row("[bold]Ready[/]", "[green]all[/]" if ready_all else f"cady={s.ready_cady} scp={s.ready_scp} l1l2={s.ready_l1l2} xphy={s.ready_xphy} aap={s.ready_aap} rf={s.ready_rf}")
+    point.add_row("[bold]Stow req[/]", "[yellow]yes[/]" if s.stow_requested else "no")
 
     # Alerts
-    alert_fields = {
-        "motors_stuck": s.alert_motors_stuck,
-        "thermal_throttle": s.alert_thermal_throttle,
-        "thermal_shutdown": s.alert_thermal_shutdown,
-        "mast_not_near_vertical": s.alert_mast_not_near_vertical,
-        "unexpected_location": s.alert_unexpected_location,
-        "slow_ethernet": s.alert_slow_ethernet_speeds,
-        "roaming": s.alert_roaming,
-        "install_pending": s.alert_install_pending,
-        "is_heating": s.alert_is_heating,
-    }
-    active = [k for k, v in alert_fields.items() if v]
-    alert_text = Text(", ".join(active) if active else "none", style="red" if active else "green")
-
-    alerts = Table.grid(padding=(0, 2))
-    alerts.add_row("[bold]Active alerts[/]", alert_text)
+    active_alerts = list(s.alerts.keys())
+    alert_subtitle = Text(
+        "alerts: " + (", ".join(active_alerts) if active_alerts else "none"),
+        style="red" if active_alerts else "green",
+    )
 
     # Device info
     dev = Table.grid(padding=(0, 2))
@@ -104,14 +102,14 @@ def _status_panel(s) -> Panel:
 
     cols = Columns([
         Panel(sig, title="Signal & Throughput"),
-        Panel(point, title="Pointing"),
+        Panel(point, title="Pointing & State"),
         Panel(dev, title="Device"),
     ])
 
     return Panel(
-        click.unstyle(str(cols)) if False else cols,  # keep rich renderables
+        cols,
         title="[bold cyan]Starlink Dish Status[/]",
-        subtitle=alerts,
+        subtitle=alert_subtitle,
     )
 
 

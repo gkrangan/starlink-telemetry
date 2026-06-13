@@ -22,34 +22,46 @@ _SERVICE = "SpaceX.API.Device.Device"
 
 @dataclass
 class DishStatus:
-    state: str
-    uptime_s: int
-    snr_above_noise_floor: float
+    # Signal / throughput
+    is_snr_above_noise_floor: bool
+    is_snr_persistently_low: bool
     pop_ping_drop_rate: float
     pop_ping_latency_ms: float
     downlink_throughput_bps: float
     uplink_throughput_bps: float
+    seconds_to_first_nonempty_slot: float
+    # Pointing
     azimuth_deg: float
     elevation_deg: float
-    seconds_to_first_nonempty_slot: float
+    # GPS
     gps_valid: bool
     gps_sats: int
-    alert_motors_stuck: bool
-    alert_thermal_throttle: bool
-    alert_thermal_shutdown: bool
-    alert_mast_not_near_vertical: bool
-    alert_unexpected_location: bool
-    alert_slow_ethernet_speeds: bool
-    alert_roaming: bool
-    alert_install_pending: bool
-    alert_is_heating: bool
+    # Obstruction
+    currently_obstructed: bool
     fraction_obstruction_ratio: float
     valid_s: int
-    id: str
-    hardware_version: str
-    software_version: str
-    country_code: str
-    utc_offset_s: int
+    # Operational state
+    uptime_s: int
+    disablement_code: int
+    mobility_class: int
+    class_of_service: int
+    eth_speed_mbps: int
+    stow_requested: bool
+    # Ready states
+    ready_cady: bool
+    ready_scp: bool
+    ready_l1l2: bool
+    ready_xphy: bool
+    ready_aap: bool
+    ready_rf: bool
+    # Alerts (active only — check alerts dict for the full set)
+    alerts: dict = field(default_factory=dict)
+    # Device info
+    id: str = ""
+    hardware_version: str = ""
+    software_version: str = ""
+    country_code: str = ""
+    utc_offset_s: int = 0
 
 
 @dataclass
@@ -173,9 +185,7 @@ class StarlinkClient:
     def _request(self, **kwargs):
         """Send a Request message and return the response."""
         self._ensure_connected()
-        req = self._Request(**kwargs)
-        resp = self._stub.Handle(iter([req]), timeout=self.timeout)
-        return next(resp)
+        return self._stub.Handle(self._Request(**kwargs), timeout=self.timeout)
 
     # ------------------------------------------------------------------
     # Read operations
@@ -185,39 +195,45 @@ class StarlinkClient:
         """Return current dish status: signal, throughput, alerts, pointing."""
         resp = self._request(get_status={})
         s = resp.dish_get_status
-        alerts = s.alerts
         dev = s.device_info
+        obs = s.obstruction_stats
+        gps = s.gps_stats
+        rs = s.ready_states
 
-        def _state_name(val):
-            try:
-                return type(val).Name(val)
-            except Exception:
-                return str(val)
+        active_alerts = {
+            f.name: getattr(s.alerts, f.name)
+            for f in s.alerts.DESCRIPTOR.fields
+            if getattr(s.alerts, f.name, False)
+        }
 
         return DishStatus(
-            state=_state_name(s.state),
-            uptime_s=s.device_state.uptime_s,
-            snr_above_noise_floor=s.snr_above_noise_floor,
+            is_snr_above_noise_floor=s.is_snr_above_noise_floor,
+            is_snr_persistently_low=s.is_snr_persistently_low,
             pop_ping_drop_rate=s.pop_ping_drop_rate,
             pop_ping_latency_ms=s.pop_ping_latency_ms,
             downlink_throughput_bps=s.downlink_throughput_bps,
             uplink_throughput_bps=s.uplink_throughput_bps,
+            seconds_to_first_nonempty_slot=s.seconds_to_first_nonempty_slot,
             azimuth_deg=s.boresight_azimuth_deg,
             elevation_deg=s.boresight_elevation_deg,
-            seconds_to_first_nonempty_slot=s.seconds_to_first_nonempty_slot,
-            gps_valid=s.gps_stats.gps_valid,
-            gps_sats=s.gps_stats.gps_sats,
-            alert_motors_stuck=alerts.motors_stuck,
-            alert_thermal_throttle=alerts.thermal_throttle,
-            alert_thermal_shutdown=alerts.thermal_shutdown,
-            alert_mast_not_near_vertical=alerts.mast_not_near_vertical,
-            alert_unexpected_location=alerts.unexpected_location,
-            alert_slow_ethernet_speeds=alerts.slow_ethernet_speeds,
-            alert_roaming=alerts.roaming,
-            alert_install_pending=alerts.install_pending,
-            alert_is_heating=alerts.is_heating,
-            fraction_obstruction_ratio=s.obstruction_stats.fraction_obstructed,
-            valid_s=s.obstruction_stats.valid_s,
+            gps_valid=gps.gps_valid,
+            gps_sats=gps.gps_sats,
+            currently_obstructed=obs.currently_obstructed,
+            fraction_obstruction_ratio=obs.fraction_obstructed,
+            valid_s=obs.valid_s,
+            uptime_s=s.device_state.uptime_s,
+            disablement_code=s.disablement_code,
+            mobility_class=s.mobility_class,
+            class_of_service=s.class_of_service,
+            eth_speed_mbps=s.eth_speed_mbps,
+            stow_requested=s.stow_requested,
+            ready_cady=rs.cady,
+            ready_scp=rs.scp,
+            ready_l1l2=rs.l1l2,
+            ready_xphy=rs.xphy,
+            ready_aap=rs.aap,
+            ready_rf=rs.rf,
+            alerts=active_alerts,
             id=dev.id,
             hardware_version=dev.hardware_version,
             software_version=dev.software_version,
