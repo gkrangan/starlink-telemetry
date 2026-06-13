@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "starlink-telemetry"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "grpcio>=1.54.0",
+    "grpcio-tools>=1.54.0",
+    "protobuf>=4.21.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+starlink = "starlink_telemetry.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["starlink_telemetry*"]
