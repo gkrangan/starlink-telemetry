@@ -65,16 +65,22 @@ class DishStatus:
 
 
 @dataclass
+class DishOutage:
+    cause: str
+    start_timestamp_ns: int
+    duration_ns: int
+    did_switch: bool
+
+
+@dataclass
 class DishHistory:
     current: int
     pop_ping_drop_rate: list[float] = field(default_factory=list)
     pop_ping_latency_ms: list[float] = field(default_factory=list)
     downlink_throughput_bps: list[float] = field(default_factory=list)
     uplink_throughput_bps: list[float] = field(default_factory=list)
-    snr: list[float] = field(default_factory=list)
-    scheduled: list[bool] = field(default_factory=list)
-    obstructed: list[bool] = field(default_factory=list)
-    no_sats: list[bool] = field(default_factory=list)
+    power_in: list[float] = field(default_factory=list)
+    outages: list[DishOutage] = field(default_factory=list)
 
 
 @dataclass
@@ -245,16 +251,31 @@ class StarlinkClient:
         """Return the history ring-buffer (~12 hours at 1-second resolution)."""
         resp = self._request(get_history={})
         h = resp.dish_get_history
+
+        def _cause_name(val):
+            try:
+                return type(val).Name(val)
+            except Exception:
+                return str(val)
+
+        outages = [
+            DishOutage(
+                cause=_cause_name(o.cause),
+                start_timestamp_ns=o.start_timestamp_ns,
+                duration_ns=o.duration_ns,
+                did_switch=o.did_switch,
+            )
+            for o in h.outages
+        ]
+
         return DishHistory(
             current=h.current,
             pop_ping_drop_rate=list(h.pop_ping_drop_rate),
             pop_ping_latency_ms=list(h.pop_ping_latency_ms),
             downlink_throughput_bps=list(h.downlink_throughput_bps),
             uplink_throughput_bps=list(h.uplink_throughput_bps),
-            snr=list(h.snr),
-            scheduled=list(h.scheduled),
-            obstructed=list(h.obstructed),
-            no_sats=list(h.no_sats),
+            power_in=list(h.power_in),
+            outages=outages,
         )
 
     def get_obstruction_map(self) -> ObstructionMap:
@@ -315,20 +336,18 @@ class StarlinkClient:
         def _avg(lst):
             return sum(lst) / len(lst) if lst else 0.0
 
-        scheduled = [v for v, s in zip(h.pop_ping_drop_rate, h.scheduled) if s]
         latency_valid = [v for v in h.pop_ping_latency_ms if v > 0]
-        obstructed_count = sum(1 for v in h.obstructed if v)
-        no_sats_count = sum(1 for v in h.no_sats if v)
+        total_outage_ms = sum(o.duration_ns / 1e6 for o in h.outages)
 
         return {
             "samples": n,
             "avg_ping_drop_rate": _avg(h.pop_ping_drop_rate),
-            "avg_ping_drop_rate_scheduled": _avg(scheduled),
             "avg_latency_ms": _avg(latency_valid),
             "avg_downlink_bps": _avg(h.downlink_throughput_bps),
             "avg_uplink_bps": _avg(h.uplink_throughput_bps),
-            "obstructed_fraction": obstructed_count / n,
-            "no_sats_fraction": no_sats_count / n,
+            "avg_power_in_w": _avg(h.power_in),
+            "outage_count": len(h.outages),
+            "total_outage_ms": total_outage_ms,
         }
 
     # ------------------------------------------------------------------

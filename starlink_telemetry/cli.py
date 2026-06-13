@@ -230,6 +230,7 @@ def history(ctx, raw):
         if raw:
             h = c.get_history()
             data = h.__dict__.copy()
+            data["outages"] = [o.__dict__ for o in h.outages]
             if ctx.obj["as_json"]:
                 click.echo(json.dumps(data, indent=2))
             else:
@@ -244,12 +245,12 @@ def history(ctx, raw):
                 t.add_column("Value")
                 t.add_row("Samples", str(summary.get("samples", 0)))
                 t.add_row("Avg ping drop", f"{summary.get('avg_ping_drop_rate', 0)*100:.3f}%")
-                t.add_row("Avg ping drop (scheduled)", f"{summary.get('avg_ping_drop_rate_scheduled', 0)*100:.3f}%")
                 t.add_row("Avg latency", f"{summary.get('avg_latency_ms', 0):.1f} ms")
                 t.add_row("Avg downlink", _fmt_bps(summary.get("avg_downlink_bps", 0)))
                 t.add_row("Avg uplink", _fmt_bps(summary.get("avg_uplink_bps", 0)))
-                t.add_row("Obstructed fraction", f"{summary.get('obstructed_fraction', 0)*100:.2f}%")
-                t.add_row("No-sats fraction", f"{summary.get('no_sats_fraction', 0)*100:.2f}%")
+                t.add_row("Avg power draw", f"{summary.get('avg_power_in_w', 0):.1f} W")
+                t.add_row("Outages", str(summary.get("outage_count", 0)))
+                t.add_row("Total outage time", f"{summary.get('total_outage_ms', 0)/1000:.1f} s")
                 console.print(t)
     except grpc.RpcError as exc:
         _handle_grpc_error(exc)
@@ -468,8 +469,10 @@ def _print_table(data: dict) -> None:
     t.add_column("Key", style="bold")
     t.add_column("Value")
     for k, v in data.items():
-        if isinstance(v, list) and len(v) > 10:
+        if isinstance(v, list) and len(v) > 10 and isinstance(v[0], float):
             t.add_row(k, f"[{v[0]:.4f}, {v[1]:.4f}, ... ({len(v)} samples)]")
+        elif isinstance(v, list) and len(v) > 5 and isinstance(v[0], dict):
+            t.add_row(k, f"({len(v)} entries) — use --json to see full detail")
         else:
             t.add_row(k, str(v))
     console.print(t)
