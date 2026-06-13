@@ -1,22 +1,21 @@
 # starlink-telemetry
 
-A Python library and CLI for pulling real-time telemetry, stats, and diagnostics from your **Starlink dish** via its local gRPC API. Works with all current hardware including the **Starlink Mini**.
+A Python library and CLI for pulling real-time telemetry, stats, and control from your **Starlink dish** via its local gRPC API. Works with all current hardware including the **Starlink Mini**.
 
 ---
 
 ## How it works
 
-Every Starlink dish exposes a private gRPC service at `192.168.100.1:9200` on your local network. This tool talks directly to that endpoint — no Starlink account, no cloud, no internet required — using the same protobuf API that the official Starlink app uses.
+Every Starlink dish exposes a private gRPC service at `192.168.100.1:9200` on your local network. This tool talks directly to that endpoint — no Starlink account, no cloud, no internet required — using the same protobuf API the official Starlink app uses.
 
-It uses **gRPC server reflection** via [yagrc](https://github.com/sparky8512/yagrc): the dish advertises its own API schema at connect time, so there are no proto files to compile or maintain. The schema is always in sync with your dish's firmware.
+It uses **gRPC server reflection** via [yagrc](https://github.com/sparky8512/yagrc): the dish advertises its own API schema at connect time, so there are no proto files to compile or maintain. The schema stays in sync with your dish's firmware automatically.
 
 ---
 
 ## Requirements
 
 - Python 3.9+
-- Starlink dish reachable at `192.168.100.1` (standard setup) or a custom IP
-- pip packages: `grpcio`, `protobuf`, `yagrc`, `click`, `rich`
+- Your machine connected to the Starlink network (dish reachable at `192.168.100.1`)
 
 ---
 
@@ -25,20 +24,26 @@ It uses **gRPC server reflection** via [yagrc](https://github.com/sparky8512/yag
 ```bash
 git clone https://github.com/gkrangan/starlink-telemetry.git
 cd starlink-telemetry
+
 python3 -m venv .venv
 source .venv/bin/activate
+
 pip install -r requirements.txt
 pip install -e .
 ```
 
-That's it — no extra setup step needed. Connect to your Starlink network and run `starlink status`.
+> **Note for macOS (Homebrew Python):** The `source .venv/bin/activate` step sets `PYTHONPATH` automatically — this is required due to a known Python 3.14 issue with editable installs in virtualenvs.
 
 ---
 
-## CLI Usage
+## Usage
 
-```
-starlink [OPTIONS] COMMAND [ARGS]...
+All commands are available via the `starlink` CLI after activating the venv.
+
+```bash
+cd starlink-telemetry
+source .venv/bin/activate
+starlink --help
 ```
 
 ### Global options
@@ -47,7 +52,7 @@ starlink [OPTIONS] COMMAND [ARGS]...
 |--------|---------|-------------|
 | `--host` | `192.168.100.1` | Dish IP address |
 | `--port` | `9200` | gRPC port |
-| `--timeout` | `10.0` | Request timeout in seconds |
+| `--timeout` | `10.0` | Request timeout (seconds) |
 | `--json` | off | Output raw JSON instead of formatted tables |
 
 ---
@@ -59,16 +64,39 @@ starlink status
 starlink --json status
 ```
 
-Displays:
-- Dish state and uptime
-- Downlink / uplink throughput (Mbps)
-- Ping latency and drop rate
-- SNR above noise floor
-- Dish pointing (azimuth, elevation)
-- GPS validity and satellite count
-- Obstruction percentage
-- Active alerts (thermal, motors, roaming, etc.)
-- Device ID, hardware and software versions
+Displays signal quality, throughput, latency, ping drop rate, pointing angles, GPS, obstruction percentage, active alerts, and device info.
+
+**Example output:**
+```
+╭─────────────────────── Starlink Dish Status ───────────────────────╮
+│ ╭──────────────────── Signal & Throughput ───────────────────────╮ │
+│ │ Uptime           1h 52m 39s                                    │ │
+│ │ Latency          22.2 ms                                       │ │
+│ │ Ping drop        0.00%                                         │ │
+│ │ SNR above noise  yes                                           │ │
+│ │ Downlink         655.48 Kbps                                   │ │
+│ │ Uplink           65.00 Kbps                                    │ │
+│ │ Ethernet         1000 Mbps                                     │ │
+│ │ Obstructed       no                                            │ │
+│ │ Obstruction %    5.4%                                          │ │
+│ ╰────────────────────────────────────────────────────────────────╯ │
+│ ╭─────────────────── Pointing & State ───────────────────────────╮ │
+│ │ Azimuth    5.3°                                                │ │
+│ │ Elevation  68.7°                                               │ │
+│ │ GPS valid  yes                                                 │ │
+│ │ GPS sats   18                                                  │ │
+│ │ Slots in   connected                                           │ │
+│ │ Ready      all                                                 │ │
+│ │ Stow req   no                                                  │ │
+│ ╰────────────────────────────────────────────────────────────────╯ │
+│ ╭──────────────────────── Device ────────────────────────────────╮ │
+│ │ ID        ut41780985-c611791c-59a90bde                         │ │
+│ │ Hardware  mini1_panda_prod1                                    │ │
+│ │ Software  2026.06.02.mr80873                                   │ │
+│ │ Country   US                                                   │ │
+│ ╰────────────────────────────────────────────────────────────────╯ │
+╰───────────────────────────── alerts: none ─────────────────────────╯
+```
 
 ---
 
@@ -90,16 +118,16 @@ Auto-refreshing status panel. Press `Ctrl-C` to stop.
 ### `history` — historical stats
 
 ```bash
-starlink history                # averaged summary (~12-hour window)
-starlink history --raw          # full per-second sample arrays
-starlink --json history --raw   # pipe raw arrays to jq, etc.
+starlink history              # averaged summary (~12-hour window)
+starlink history --raw        # full per-second sample arrays
+starlink --json history       # JSON output for piping
 ```
 
-The dish maintains a ring buffer of ~45,000 one-second samples (roughly 12 hours). The summary view averages these into a single report. The `--raw` flag dumps every array.
+The dish maintains a ring buffer of ~45,000 one-second samples (roughly 12 hours). The summary view shows averaged metrics; `--raw` dumps every array.
 
-Summary metrics:
+**Summary metrics:**
 - Total samples in window
-- Average ping drop rate (all slots + scheduled-only)
+- Average ping drop rate (all + scheduled slots only)
 - Average latency (ms)
 - Average downlink / uplink throughput
 - Fraction of time obstructed or without satellites
@@ -112,31 +140,31 @@ Summary metrics:
 starlink obstruction-map
 ```
 
-Renders the dish's sky obstruction bitmap as an ASCII grid. Filled blocks (`█`) represent clear sky; light blocks (`░`) represent partially obstructed cells; spaces are blocked/no-data cells.
+Renders the dish's sky obstruction bitmap as an ASCII grid. Filled blocks (`█`) represent clear sky; light blocks (`░`) are partially obstructed; spaces are blocked/no-data.
 
 ---
 
-### `config` — dish configuration
+### `config` — view dish configuration
 
 ```bash
 starlink config
 starlink --json config
 ```
 
-Shows the current dish configuration: power save schedule, snow melt mode, level-dish mode, and location request mode.
+Shows power save schedule, snow melt mode, level-dish mode, and location request mode.
 
 ---
 
 ### `set-config` — update configuration
 
 ```bash
-# Enable power save mode, 02:00–10:00 UTC daily
+# Enable power save 02:00–10:00 UTC daily
 starlink set-config --power-save --power-save-start 120 --power-save-duration 480
 
 # Disable power save
 starlink set-config --no-power-save
 
-# Enable snow melt (0=off, 1=on, 2=auto)
+# Snow melt mode: 0=off, 1=on, 2=auto
 starlink set-config --snow-melt-mode 2
 ```
 
@@ -144,7 +172,7 @@ starlink set-config --snow-melt-mode 2
 |--------|-------------|
 | `--power-save / --no-power-save` | Toggle power save mode |
 | `--power-save-start MINUTES` | Start time (minutes from midnight UTC) |
-| `--power-save-duration MINUTES` | Duration of power save window |
+| `--power-save-duration MINUTES` | Duration in minutes |
 | `--snow-melt-mode 0\|1\|2` | Snow melt: 0=off, 1=on, 2=auto |
 
 ---
@@ -156,7 +184,7 @@ starlink diagnostics
 starlink --json diagnostics
 ```
 
-Returns hardware version, software version, country code, and a full list of active alert flags.
+Returns hardware version, software version, country code, and all active alert flags.
 
 ---
 
@@ -166,7 +194,7 @@ Returns hardware version, software version, country code, and a full list of act
 starlink reboot
 ```
 
-Prompts for confirmation before sending the reboot command.
+Prompts for confirmation before sending.
 
 ---
 
@@ -174,16 +202,16 @@ Prompts for confirmation before sending the reboot command.
 
 ```bash
 starlink stow     # tilt dish flat for transport (Starlink Mini)
-starlink unstow   # return to operational pointing
+starlink unstow   # return to operational position
 ```
 
-Both commands prompt for confirmation.
+Both prompt for confirmation.
 
 ---
 
-## Library Usage
+## Library usage
 
-Import `StarlinkClient` directly for use in your own scripts or applications.
+Import `StarlinkClient` directly in your own scripts.
 
 ```python
 from starlink_telemetry import StarlinkClient
@@ -191,14 +219,14 @@ from starlink_telemetry import StarlinkClient
 # One-shot query
 with StarlinkClient() as c:
     s = c.get_status()
-    print(f"Down: {s.downlink_throughput_bps/1e6:.1f} Mbps")
-    print(f"Up:   {s.uplink_throughput_bps/1e6:.1f} Mbps")
-    print(f"Ping: {s.pop_ping_latency_ms:.0f} ms  drop: {s.pop_ping_drop_rate*100:.2f}%")
+    print(f"Down: {s.downlink_throughput_bps / 1e6:.1f} Mbps")
+    print(f"Up:   {s.uplink_throughput_bps / 1e6:.1f} Mbps")
+    print(f"Ping: {s.pop_ping_latency_ms:.0f} ms  drop: {s.pop_ping_drop_rate * 100:.2f}%")
 ```
 
 ```python
 # Custom host / port
-client = StarlinkClient(host="192.168.1.1", port=9200, timeout=5.0)
+client = StarlinkClient(host="192.168.100.1", port=9200, timeout=5.0)
 client.connect()
 cfg = client.get_config()
 client.close()
@@ -208,16 +236,16 @@ client.close()
 # Live monitoring loop
 with StarlinkClient() as c:
     for snapshot in c.monitor(interval_s=5):
-        bps = snapshot.downlink_throughput_bps
-        print(f"{bps/1e6:.2f} Mbps")
+        print(f"{snapshot.downlink_throughput_bps / 1e6:.2f} Mbps")
 ```
 
 ```python
 # History summary
 with StarlinkClient() as c:
     summary = c.get_history_summary()
-    print(f"Avg latency: {summary['avg_latency_ms']:.1f} ms")
-    print(f"Obstruction: {summary['obstructed_fraction']*100:.1f}%")
+    print(f"Avg latency:    {summary['avg_latency_ms']:.1f} ms")
+    print(f"Obstruction:    {summary['obstructed_fraction'] * 100:.1f}%")
+    print(f"Avg downlink:   {summary['avg_downlink_bps'] / 1e6:.1f} Mbps")
 ```
 
 ### API reference
@@ -232,8 +260,8 @@ with StarlinkClient() as c:
 | `get_diagnostics()` | `DishDiagnostics` | Hardware diagnostics and alerts |
 | `set_config(**kwargs)` | `None` | Update dish configuration |
 | `reboot()` | `None` | Reboot the dish |
-| `stow()` | `None` | Stow dish for transport |
-| `unstow()` | `None` | Unstow dish to operational position |
+| `stow()` | `None` | Stow dish flat for transport |
+| `unstow()` | `None` | Return dish to operational position |
 | `monitor(interval_s)` | `Generator[DishStatus]` | Infinite stream of status snapshots |
 
 ---
@@ -242,16 +270,18 @@ with StarlinkClient() as c:
 
 ### Standard setup (Starlink router)
 
-The dish is always reachable at `192.168.100.1:9200` from any device on your Starlink router's LAN — no extra configuration needed.
+The dish is reachable at `192.168.100.1:9200` from any device on the Starlink router's LAN — no extra config needed.
 
 ### Bypass / direct connection (Starlink Mini)
 
-When using the Starlink Mini's PoE cable in bypass mode (no Starlink router), your device needs a route to `192.168.100.0/24`. Add a static route to that subnet via the interface connected to the dish, or use `--host` if your network topology differs.
+When using the Mini's PoE cable in bypass mode (no Starlink router), your device needs a route to `192.168.100.0/24`.
 
 ```bash
-# macOS — add route via the interface connected to the dish (e.g. en5)
+# macOS — add a route via the interface connected to the dish (e.g. en5)
 sudo route add -net 192.168.100.0/24 -interface en5
 ```
+
+Use `--host` if your dish is at a different IP.
 
 ---
 
@@ -261,8 +291,8 @@ sudo route add -net 192.168.100.0/24 -interface en5
 starlink-telemetry/
 ├── starlink_telemetry/
 │   ├── __init__.py    # exports StarlinkClient
-│   ├── client.py      # StarlinkClient + dataclasses
-│   └── cli.py         # click + rich CLI
+│   ├── client.py      # StarlinkClient + dataclasses for all API responses
+│   └── cli.py         # click + rich terminal CLI
 ├── requirements.txt
 └── pyproject.toml
 ```
