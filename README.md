@@ -36,13 +36,30 @@ pip install -e .
 
 ---
 
+## Every time you want to use it
+
+Open a terminal and run these three commands:
+
+```bash
+cd /Users/gkrangan/Documents/vscode-projects/starlink-telemetry
+source .venv/bin/activate
+starlink status
+```
+
+> **Important:** Always use `source .venv/bin/activate` — not `.venv/bin/activate` on its own.
+> The `source` command loads the virtual environment into your current shell session.
+> Running it without `source` will give a "permission denied" error and won't work.
+
+Your prompt will change to show `(.venv)` when the environment is active.
+To deactivate when you're done: type `deactivate`.
+
+---
+
 ## Usage
 
 All commands are available via the `starlink` CLI after activating the venv.
 
 ```bash
-cd starlink-telemetry
-source .venv/bin/activate
 starlink --help
 ```
 
