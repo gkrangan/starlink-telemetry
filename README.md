@@ -19,7 +19,7 @@ It uses **gRPC server reflection** via [yagrc](https://github.com/sparky8512/yag
 
 ---
 
-## Installation
+## Installation (one-time)
 
 ```bash
 git clone https://github.com/gkrangan/starlink-telemetry.git
@@ -38,7 +38,7 @@ pip install -e .
 
 ## Every time you want to use it
 
-Open a terminal and run these three commands:
+Open a terminal and run these exact three commands:
 
 ```bash
 cd /Users/gkrangan/Documents/vscode-projects/starlink-telemetry
@@ -55,15 +55,37 @@ To deactivate when you're done: type `deactivate`.
 
 ---
 
-## Usage
+## Commands
 
-All commands are available via the `starlink` CLI after activating the venv.
+### Quick reference
+
+| Command | What it does |
+|---------|-------------|
+| `starlink status` | Current signal, throughput, latency, alerts |
+| `starlink watch` | Live auto-refreshing status (Ctrl-C to stop) |
+| `starlink watch --interval 2` | Refresh every 2 seconds |
+| `starlink history` | Averaged stats over the last ~12 hours |
+| `starlink history --raw` | Full per-second sample arrays |
+| `starlink obstruction-map` | ASCII sky obstruction grid |
+| `starlink config` | Show dish configuration |
+| `starlink set-config --power-save` | Enable power save mode |
+| `starlink set-config --no-power-save` | Disable power save mode |
+| `starlink set-config --snow-melt-mode 2` | Snow melt: 0=off 1=on 2=auto |
+| `starlink set-config --power-save-start 120 --power-save-duration 480` | Power save 02:00–10:00 UTC |
+| `starlink diagnostics` | Hardware diagnostics and active alerts |
+| `starlink reboot` | Reboot the dish (asks for confirmation) |
+| `starlink reboot --yes` | Reboot without confirmation prompt |
+| `starlink stow` | Tilt dish flat for transport (asks for confirmation) |
+| `starlink stow --yes` | Stow without confirmation prompt |
+| `starlink unstow` | Return dish to operational position |
+
+### Global options (go before the command)
 
 ```bash
-starlink --help
+starlink --json status          # raw JSON output instead of formatted table
+starlink --host 192.168.1.1 status  # use a different dish IP
+starlink --timeout 5 status     # shorter timeout (seconds)
 ```
-
-### Global options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -74,7 +96,7 @@ starlink --help
 
 ---
 
-### `status` — current dish snapshot
+### `status`
 
 ```bash
 starlink status
@@ -85,39 +107,39 @@ Displays signal quality, throughput, latency, ping drop rate, pointing angles, G
 
 **Example output:**
 ```
-╭─────────────────────── Starlink Dish Status ───────────────────────╮
-│ ╭──────────────────── Signal & Throughput ───────────────────────╮ │
-│ │ Uptime           1h 52m 39s                                    │ │
-│ │ Latency          22.2 ms                                       │ │
-│ │ Ping drop        0.00%                                         │ │
-│ │ SNR above noise  yes                                           │ │
-│ │ Downlink         655.48 Kbps                                   │ │
-│ │ Uplink           65.00 Kbps                                    │ │
-│ │ Ethernet         1000 Mbps                                     │ │
-│ │ Obstructed       no                                            │ │
-│ │ Obstruction %    5.4%                                          │ │
-│ ╰────────────────────────────────────────────────────────────────╯ │
-│ ╭─────────────────── Pointing & State ───────────────────────────╮ │
-│ │ Azimuth    5.3°                                                │ │
-│ │ Elevation  68.7°                                               │ │
-│ │ GPS valid  yes                                                 │ │
-│ │ GPS sats   18                                                  │ │
-│ │ Slots in   connected                                           │ │
-│ │ Ready      all                                                 │ │
-│ │ Stow req   no                                                  │ │
-│ ╰────────────────────────────────────────────────────────────────╯ │
-│ ╭──────────────────────── Device ────────────────────────────────╮ │
-│ │ ID        ut41780985-c611791c-59a90bde                         │ │
-│ │ Hardware  mini1_panda_prod1                                    │ │
-│ │ Software  2026.06.02.mr80873                                   │ │
-│ │ Country   US                                                   │ │
-│ ╰────────────────────────────────────────────────────────────────╯ │
-╰───────────────────────────── alerts: none ─────────────────────────╯
+╭──────────────────────────── Starlink Dish Status ────────────────────────────╮
+│ ╭──────────────────────── Signal & Throughput ────────────────────────╮      │
+│ │ Uptime           1h 52m 39s                                         │      │
+│ │ Latency          22.2 ms                                            │      │
+│ │ Ping drop        0.00%                                              │      │
+│ │ SNR above noise  yes                                                │      │
+│ │ Downlink         655.48 Kbps                                        │      │
+│ │ Uplink           65.00 Kbps                                         │      │
+│ │ Ethernet         1000 Mbps                                          │      │
+│ │ Obstructed       no                                                 │      │
+│ │ Obstruction %    5.4%                                               │      │
+│ ╰─────────────────────────────────────────────────────────────────────╯      │
+│ ╭───────────────────────── Pointing & State ──────────────────────────╮      │
+│ │ Azimuth    5.3°                                                     │      │
+│ │ Elevation  68.7°                                                    │      │
+│ │ GPS valid  yes                                                      │      │
+│ │ GPS sats   18                                                       │      │
+│ │ Slots in   connected                                                │      │
+│ │ Ready      cady=False scp=True l1l2=True xphy=True aap=True rf=True │      │
+│ │ Stow req   no                                                       │      │
+│ ╰─────────────────────────────────────────────────────────────────────╯      │
+│ ╭────────────────────────────── Device ───────────────────────────────╮      │
+│ │ ID        ut41780985-c611791c-59a90bde                              │      │
+│ │ Hardware  mini1_panda_prod1                                         │      │
+│ │ Software  2026.06.02.mr80873                                        │      │
+│ │ Country   US                                                        │      │
+│ ╰─────────────────────────────────────────────────────────────────────╯      │
+╰──────────────────────────────── alerts: none ────────────────────────────────╯
 ```
 
 ---
 
-### `watch` — live dashboard
+### `watch`
 
 ```bash
 starlink watch
@@ -132,69 +154,62 @@ Auto-refreshing status panel. Press `Ctrl-C` to stop.
 
 ---
 
-### `history` — historical stats
+### `history`
 
 ```bash
-starlink history              # averaged summary (~12-hour window)
-starlink history --raw        # full per-second sample arrays
-starlink --json history       # JSON output for piping
+starlink history           # averaged summary (~12-hour window)
+starlink history --raw     # full per-second sample arrays
+starlink --json history    # JSON output
 ```
 
 The dish maintains a ring buffer of ~45,000 one-second samples (roughly 12 hours). The summary view shows averaged metrics; `--raw` dumps every array.
 
-**Summary metrics:**
-- Total samples in window
-- Average ping drop rate (all + scheduled slots only)
-- Average latency (ms)
-- Average downlink / uplink throughput
-- Fraction of time obstructed or without satellites
+| Option | Description |
+|--------|-------------|
+| `--raw` | Dump raw per-second sample arrays instead of summary |
 
 ---
 
-### `obstruction-map` — sky view
+### `obstruction-map`
 
 ```bash
 starlink obstruction-map
 ```
 
-Renders the dish's sky obstruction bitmap as an ASCII grid. Filled blocks (`█`) represent clear sky; light blocks (`░`) are partially obstructed; spaces are blocked/no-data.
+Renders the dish's sky obstruction bitmap as an ASCII grid. Filled blocks (`█`) = clear sky, light blocks (`░`) = partially obstructed, spaces = blocked/no-data.
 
 ---
 
-### `config` — view dish configuration
+### `config`
 
 ```bash
 starlink config
 starlink --json config
 ```
 
-Shows power save schedule, snow melt mode, level-dish mode, and location request mode.
+Shows the current dish configuration: power save schedule, snow melt mode, level-dish mode, location request mode.
 
 ---
 
-### `set-config` — update configuration
+### `set-config`
 
 ```bash
-# Enable power save 02:00–10:00 UTC daily
-starlink set-config --power-save --power-save-start 120 --power-save-duration 480
-
-# Disable power save
+starlink set-config --power-save
 starlink set-config --no-power-save
-
-# Snow melt mode: 0=off, 1=on, 2=auto
+starlink set-config --power-save-start 120 --power-save-duration 480
 starlink set-config --snow-melt-mode 2
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--power-save / --no-power-save` | Toggle power save mode |
-| `--power-save-start MINUTES` | Start time (minutes from midnight UTC) |
-| `--power-save-duration MINUTES` | Duration in minutes |
-| `--snow-melt-mode 0\|1\|2` | Snow melt: 0=off, 1=on, 2=auto |
+| `--power-save / --no-power-save` | Enable or disable power save mode |
+| `--power-save-start MINUTES` | Start time (minutes from midnight UTC, e.g. 120 = 02:00) |
+| `--power-save-duration MINUTES` | Duration of power save window in minutes |
+| `--snow-melt-mode 0\|1\|2` | 0 = off, 1 = on, 2 = auto |
 
 ---
 
-### `diagnostics` — hardware diagnostics
+### `diagnostics`
 
 ```bash
 starlink diagnostics
@@ -205,24 +220,23 @@ Returns hardware version, software version, country code, and all active alert f
 
 ---
 
-### `reboot` — reboot the dish
+### `reboot`
 
 ```bash
-starlink reboot
+starlink reboot        # prompts for confirmation
+starlink reboot --yes  # skips confirmation
 ```
-
-Prompts for confirmation before sending.
 
 ---
 
-### `stow` / `unstow` — transport mode
+### `stow` / `unstow`
 
 ```bash
-starlink stow     # tilt dish flat for transport (Starlink Mini)
-starlink unstow   # return to operational position
+starlink stow          # tilt dish flat for transport — prompts for confirmation
+starlink stow --yes    # skips confirmation
+starlink unstow        # return to operational position — prompts for confirmation
+starlink unstow --yes  # skips confirmation
 ```
-
-Both prompt for confirmation.
 
 ---
 
@@ -260,9 +274,9 @@ with StarlinkClient() as c:
 # History summary
 with StarlinkClient() as c:
     summary = c.get_history_summary()
-    print(f"Avg latency:    {summary['avg_latency_ms']:.1f} ms")
-    print(f"Obstruction:    {summary['obstructed_fraction'] * 100:.1f}%")
-    print(f"Avg downlink:   {summary['avg_downlink_bps'] / 1e6:.1f} Mbps")
+    print(f"Avg latency:  {summary['avg_latency_ms']:.1f} ms")
+    print(f"Obstruction:  {summary['obstructed_fraction'] * 100:.1f}%")
+    print(f"Avg downlink: {summary['avg_downlink_bps'] / 1e6:.1f} Mbps")
 ```
 
 ### API reference
