@@ -32,7 +32,7 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-> **Note for macOS (Homebrew Python):** The `source .venv/bin/activate` step sets `PYTHONPATH` automatically — this is required due to a known Python 3.14 issue with editable installs in virtualenvs.
+> **macOS note:** The `source .venv/bin/activate` step sets `PYTHONPATH` automatically. This is required due to a known Python 3.14 issue with editable installs in virtualenvs.
 
 ---
 
@@ -46,12 +46,11 @@ source .venv/bin/activate
 starlink status
 ```
 
-> **Important:** Always use `source .venv/bin/activate` — not `.venv/bin/activate` on its own.
-> The `source` command loads the virtual environment into your current shell session.
-> Running it without `source` will give a "permission denied" error and won't work.
-
-Your prompt will change to show `(.venv)` when the environment is active.
-To deactivate when you're done: type `deactivate`.
+> **Important:** Always use `source .venv/bin/activate` — **not** `.venv/bin/activate` on its own.
+> Without `source`, you'll get a "permission denied" error. The `source` command loads the
+> virtual environment into your current shell session. Your prompt will change to show `(.venv)`.
+>
+> To deactivate when you're done: type `deactivate`.
 
 ---
 
@@ -64,7 +63,7 @@ To deactivate when you're done: type `deactivate`.
 | `starlink status` | Current signal, throughput, latency, alerts |
 | `starlink watch` | Live auto-refreshing status (Ctrl-C to stop) |
 | `starlink watch --interval 2` | Refresh every 2 seconds |
-| `starlink history` | Averaged stats over the last ~12 hours |
+| `starlink history` | Averaged stats over the last ~15 minutes |
 | `starlink history --raw` | Full per-second sample arrays |
 | `starlink obstruction-map` | ASCII sky obstruction grid |
 | `starlink config` | Show dish configuration |
@@ -78,13 +77,14 @@ To deactivate when you're done: type `deactivate`.
 | `starlink stow` | Tilt dish flat for transport (asks for confirmation) |
 | `starlink stow --yes` | Stow without confirmation prompt |
 | `starlink unstow` | Return dish to operational position |
+| `starlink unstow --yes` | Unstow without confirmation prompt |
 
-### Global options (go before the command)
+### Global options (go **before** the command)
 
 ```bash
-starlink --json status          # raw JSON output instead of formatted table
-starlink --host 192.168.1.1 status  # use a different dish IP
-starlink --timeout 5 status     # shorter timeout (seconds)
+starlink --json status           # raw JSON output instead of formatted table
+starlink --host 192.168.100.1 status  # use a different dish IP
+starlink --timeout 5 status      # shorter timeout in seconds
 ```
 
 | Option | Default | Description |
@@ -93,6 +93,19 @@ starlink --timeout 5 status     # shorter timeout (seconds)
 | `--port` | `9200` | gRPC port |
 | `--timeout` | `10.0` | Request timeout (seconds) |
 | `--json` | off | Output raw JSON instead of formatted tables |
+
+> **Note:** `--json` and `--host` are **global flags** and must come before the command name:
+> `starlink --json status` ✓  — not `starlink status --json` ✗
+
+Use `-h` or `--help` on any command for details and examples:
+
+```bash
+starlink -h
+starlink status -h
+starlink watch -h
+starlink history -h
+starlink set-config -h
+```
 
 ---
 
@@ -103,7 +116,7 @@ starlink status
 starlink --json status
 ```
 
-Displays signal quality, throughput, latency, ping drop rate, pointing angles, GPS, obstruction percentage, active alerts, and device info.
+Displays: signal quality, throughput, latency, ping drop rate, pointing angles, GPS lock, obstruction %, active alerts, and device info.
 
 **Example output:**
 ```
@@ -144,6 +157,7 @@ Displays signal quality, throughput, latency, ping drop rate, pointing angles, G
 ```bash
 starlink watch
 starlink watch --interval 2
+starlink watch --interval 0.5
 ```
 
 Auto-refreshing status panel. Press `Ctrl-C` to stop.
@@ -157,16 +171,35 @@ Auto-refreshing status panel. Press `Ctrl-C` to stop.
 ### `history`
 
 ```bash
-starlink history           # averaged summary (~12-hour window)
-starlink history --raw     # full per-second sample arrays
-starlink --json history    # JSON output
+starlink history              # averaged summary
+starlink history --raw        # full per-second sample arrays
+starlink --json history       # JSON output
+starlink --json history --raw # raw arrays as JSON
 ```
 
-The dish maintains a ring buffer of ~45,000 one-second samples (roughly 12 hours). The summary view shows averaged metrics; `--raw` dumps every array.
+The dish keeps a rolling window of ~900 one-second samples. The summary view shows averaged metrics; `--raw` shows every per-second data point.
+
+**Summary output:**
+
+```
+          History Summary
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ Metric            ┃ Value       ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ Samples           │ 900         │
+│ Avg ping drop     │ 1.889%      │
+│ Avg latency       │ 28.7 ms     │
+│ Avg downlink      │ 75.50 Kbps  │
+│ Avg uplink        │ 180.49 Kbps │
+│ Avg power draw    │ 20.6 W      │
+│ Outages           │ 182         │
+│ Total outage time │ 272.6 s     │
+└───────────────────┴─────────────┘
+```
 
 | Option | Description |
 |--------|-------------|
-| `--raw` | Dump raw per-second sample arrays instead of summary |
+| `--raw` | Dump full per-second sample arrays instead of summary |
 
 ---
 
@@ -174,9 +207,11 @@ The dish maintains a ring buffer of ~45,000 one-second samples (roughly 12 hours
 
 ```bash
 starlink obstruction-map
+starlink --json obstruction-map
 ```
 
-Renders the dish's sky obstruction bitmap as an ASCII grid. Filled blocks (`█`) = clear sky, light blocks (`░`) = partially obstructed, spaces = blocked/no-data.
+Renders the dish's sky obstruction bitmap as an ASCII grid.
+`█` = clear sky, `░` = partially obstructed, ` ` = blocked/no data.
 
 ---
 
@@ -187,7 +222,7 @@ starlink config
 starlink --json config
 ```
 
-Shows the current dish configuration: power save schedule, snow melt mode, level-dish mode, location request mode.
+Shows the current dish configuration: power save schedule, snow melt mode, level-dish mode, and location request mode.
 
 ---
 
@@ -203,8 +238,8 @@ starlink set-config --snow-melt-mode 2
 | Option | Description |
 |--------|-------------|
 | `--power-save / --no-power-save` | Enable or disable power save mode |
-| `--power-save-start MINUTES` | Start time (minutes from midnight UTC, e.g. 120 = 02:00) |
-| `--power-save-duration MINUTES` | Duration of power save window in minutes |
+| `--power-save-start MINUTES` | Start time in minutes from midnight UTC (e.g. `120` = 02:00) |
+| `--power-save-duration MINUTES` | Duration in minutes (e.g. `480` = 8 hours) |
 | `--snow-melt-mode 0\|1\|2` | 0 = off, 1 = on, 2 = auto |
 
 ---
@@ -256,7 +291,7 @@ with StarlinkClient() as c:
 ```
 
 ```python
-# Custom host / port
+# Custom host / port / timeout
 client = StarlinkClient(host="192.168.100.1", port=9200, timeout=5.0)
 client.connect()
 cfg = client.get_config()
@@ -274,9 +309,10 @@ with StarlinkClient() as c:
 # History summary
 with StarlinkClient() as c:
     summary = c.get_history_summary()
-    print(f"Avg latency:  {summary['avg_latency_ms']:.1f} ms")
-    print(f"Obstruction:  {summary['obstructed_fraction'] * 100:.1f}%")
-    print(f"Avg downlink: {summary['avg_downlink_bps'] / 1e6:.1f} Mbps")
+    print(f"Avg latency:    {summary['avg_latency_ms']:.1f} ms")
+    print(f"Avg downlink:   {summary['avg_downlink_bps'] / 1e6:.1f} Mbps")
+    print(f"Avg power draw: {summary['avg_power_in_w']:.1f} W")
+    print(f"Outages:        {summary['outage_count']}")
 ```
 
 ### API reference
@@ -284,7 +320,7 @@ with StarlinkClient() as c:
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `get_status()` | `DishStatus` | Current signal, throughput, alerts, pointing |
-| `get_history()` | `DishHistory` | Full ring-buffer of per-second samples |
+| `get_history()` | `DishHistory` | Rolling window of per-second samples + outages |
 | `get_history_summary()` | `dict` | Averaged stats over the history window |
 | `get_obstruction_map()` | `ObstructionMap` | Sky view bitmap |
 | `get_config()` | `DishConfig` | Current dish configuration |
@@ -301,7 +337,7 @@ with StarlinkClient() as c:
 
 ### Standard setup (Starlink router)
 
-The dish is reachable at `192.168.100.1:9200` from any device on the Starlink router's LAN — no extra config needed.
+The dish is always reachable at `192.168.100.1:9200` from any device on the Starlink router's LAN — no extra config needed.
 
 ### Bypass / direct connection (Starlink Mini)
 
